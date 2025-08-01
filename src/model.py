@@ -20,14 +20,6 @@ class Thumbnails(BaseModel):
     standard: Optional[Image] = None
     maxres: Optional[Image] = None
 
-    main: str = (
-        standard
-        or high
-        or medium
-        or default
-        or "https://images.unsplash.com/vector-1743473329244-f81d2c2a18f4"
-    )
-
 
 # Data model for ResourceId in playlist items
 class PlaylistItemResourceId(BaseModel):

@@ -1,7 +1,7 @@
 from requests import get
 from dotenv import load_dotenv
 from os import getenv
-from src.model import PlaylistItemsResponse
+from src.model import PlaylistItemsResponse, BaseModel
 from src.simple_model import simplePlaylistResponse, simpleVideoResponse, channelDetails
 
 from utils import get_logger
@@ -10,21 +10,36 @@ from utils import get_logger
 load_dotenv()
 log = get_logger(__name__)
 
+# Simple cache dictionary
+cache = {}
 
-def getResponse(endpoint: str, params: dict, timeout=5000) -> dict | None:
+
+def getResponse(
+    endpoint: str, params: dict, timeout=5000, useCache=True
+) -> dict | None:
     """
-    Handles all the request to Youtube API
+    Handles all the request to Youtube API with caching.
     """
     base_url = "https://youtube.googleapis.com/youtube/v3/"
     params["key"] = getenv("YOUTUBE_API_KEY")
     headers = {"Accept": "application/json"}
 
-    # Todo : Add a caching method with expiry to reduce API Calls
+    # Create a unique cache key from endpoint and params
+    cache_key = (endpoint, tuple(sorted(params.items())))
+
+    # Check if response is in cache
+    if cache_key in cache and useCache:
+        log.info("Cache hit for %s", cache_key)
+        return cache[cache_key]
+
     response = get(base_url + endpoint, params, headers=headers, timeout=timeout)
 
     if response.status_code == 200:
         try:
-            return response.json()
+            response_json = response.json()
+            # Store response in cache
+            cache[cache_key] = response_json
+            return response_json
         except Exception as e:
             log.error("%s sent error for %s, reason %s", endpoint, params, str(e))
             return None
@@ -61,14 +76,14 @@ def getChannelInfobyId(id: str) -> channelDetails | None:
             log.warning("Failed to parse channel data %s \n %s", resp, str(e))
 
 
-def getPlaylistFromIdRaw(id: str) -> PlaylistItemsResponse | None:
+def getPlaylistFromIdRaw(id: str, useCache=True) -> PlaylistItemsResponse | None:
     """
     Returns the required Playlist in RAW Format
     """
 
     params = {"part": "snippet,contentDetails", "maxResults": "50", "playlistId": id}
 
-    resp = getResponse("playlistItems", params)
+    resp = getResponse("playlistItems", params, useCache=useCache)
 
     if resp:
         try:
@@ -78,11 +93,11 @@ def getPlaylistFromIdRaw(id: str) -> PlaylistItemsResponse | None:
     return None
 
 
-def getPlaylistFromIdSimple(id: str) -> simplePlaylistResponse | None:
+def getPlaylistFromIdSimple(id: str, useCache=True) -> simplePlaylistResponse | None:
     """
     Returns the required Playlist in Simple Format
     """
-    playlist_response = getPlaylistFromIdRaw(id)
+    playlist_response = getPlaylistFromIdRaw(id, useCache)
     if playlist_response:
         videos = []
 
@@ -95,13 +110,8 @@ def getPlaylistFromIdSimple(id: str) -> simplePlaylistResponse | None:
             description = item.snippet.description
             channel_name = item.snippet.channelTitle
             channel_id = item.snippet.channelId
-            channel_detail = getChannelInfobyId(channel_id)
-            channel_image = ""
-            if channel_detail:
-                channel_image = channel_detail.thumbnails.default.url
 
             # Note: View count is not available in the playlist items response.
-            # You would need to make a separate video API call for each video to get view counts.
             videos.append(
                 simpleVideoResponse(
                     video_id=video_id,
@@ -109,7 +119,6 @@ def getPlaylistFromIdSimple(id: str) -> simplePlaylistResponse | None:
                     description=description,
                     channel_name=channel_name,
                     channel_id=channel_id,
-                    channel_image_url=channel_image,
                     thumbnail=item.snippet.thumbnails,
                     date_upload=item.contentDetails.videoPublishedAt,
                 )
@@ -126,7 +135,46 @@ def getPlaylistFromIdSimple(id: str) -> simplePlaylistResponse | None:
             videos=videos,
         )
 
+
+class playlistQuery(BaseModel):
+    query: str
+    max_results: int = 50
+    pageToken: str = None
+    regionCode: str = "IN"
+
+
+def searchPlaylists(query: playlistQuery):
+    """
+    Searches for playlists using the YouTube API and returns a list of playlist
+
+    Args:
+        query: The search query.
+        max_results: The maximum number of results to return (default is 10).
+        pageToken: The page token for the next page of results.
+
+    Returns:
+        A list of playlist.
+    """
+    params = {
+        "part": "snippet",
+        "q": query.query,
+        "type": "playlist",
+        "maxResults": query.max_results,
+        "regionCode": query.regionCode,
+    }
+    if query.pageToken:
+        params["pageToken"] = query.pageToken
+
+    resp = getResponse("search", params, useCache=False)
+
+    # playlists = []
+    # if resp and resp.get("items"):
+    #     for item in resp["items"]:
+    #       playlists.append(item['snippet'])
+
+    return resp
+
+
 def test_playlists():
     id = "PLTWGH5orWwL1-W-t21jQOIWUO6GKsc0ir"
     assert getPlaylistFromIdSimple(id) is not None
-

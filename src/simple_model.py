@@ -9,7 +9,6 @@ class simpleVideoResponse(BaseModel):
     description: str
     channel_name: str
     channel_id: str
-    channel_image_url: str
     thumbnail: Thumbnails
     date_upload: datetime | None
 
