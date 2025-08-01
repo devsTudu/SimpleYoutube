@@ -873,6 +873,7 @@ dependencies = [
     { name = "ipykernel" },
     { name = "pytest" },
     { name = "requests" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -882,6 +883,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.30.0" },
     { name = "pytest", specifier = ">=8.4.1" },
     { name = "requests", specifier = ">=2.32.4" },
+    { name = "uvicorn", specifier = ">=0.35.0" },
 ]
 
 [[package]]
