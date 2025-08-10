@@ -76,12 +76,16 @@ def getChannelInfobyId(id: str) -> channelDetails | None:
             log.warning("Failed to parse channel data %s \n %s", resp, str(e))
 
 
-def getPlaylistFromIdRaw(id: str, useCache=True) -> PlaylistItemsResponse | None:
+def getPlaylistFromIdRaw(
+    id: str, page_token: str = "", useCache=True
+) -> PlaylistItemsResponse | None:
     """
     Returns the required Playlist in RAW Format
     """
 
     params = {"part": "snippet,contentDetails", "maxResults": "50", "playlistId": id}
+    if page_token:
+        params["pageToken"] = page_token
 
     resp = getResponse("playlistItems", params, useCache=useCache)
 
@@ -93,21 +97,19 @@ def getPlaylistFromIdRaw(id: str, useCache=True) -> PlaylistItemsResponse | None
     return None
 
 
-def getPlaylistFromIdSimple(id: str, useCache=True) -> simplePlaylistResponse | None:
+def getPlaylistFromIdSimple(
+    id: str, useCache=True, pl_title: str = "", pl_descr: str = ""
+) -> simplePlaylistResponse | None:
     """
     Returns the required Playlist in Simple Format
     """
-    playlist_response = getPlaylistFromIdRaw(id, useCache)
-    if playlist_response:
-        videos = []
-
-        playlist_title = "Extracted Playlist"
-        playlist_description = "Details extracted from playlist items"
-
+    playlist_response = getPlaylistFromIdRaw(id,useCache=useCache)
+    videos = []
+    while playlist_response:
         for item in playlist_response.items:
             video_id = item.contentDetails.videoId
-            title = item.snippet.title
-            description = item.snippet.description
+            video_title = item.snippet.title
+            video_description = item.snippet.description
             channel_name = item.snippet.channelTitle
             channel_id = item.snippet.channelId
 
@@ -115,25 +117,25 @@ def getPlaylistFromIdSimple(id: str, useCache=True) -> simplePlaylistResponse | 
             videos.append(
                 simpleVideoResponse(
                     video_id=video_id,
-                    title=title,
-                    description=description,
+                    title=video_title,
+                    description=video_description,
                     channel_name=channel_name,
                     channel_id=channel_id,
                     thumbnail=item.snippet.thumbnails,
                     date_upload=item.contentDetails.videoPublishedAt,
                 )
             )
-
-        return simplePlaylistResponse(
-            playlist_id=(
-                playlist_response.items[0].snippet.playlistId
-                if playlist_response.items
-                else "N/A"
-            ),  # Using playlistId from the first item
-            title=playlist_title,
-            description=playlist_description,
-            videos=videos,
-        )
+        page_next = playlist_response.nextPageToken
+        if page_next:
+            playlist_response = getPlaylistFromIdRaw(id, page_next)
+        else:
+            playlist_response = None
+    return simplePlaylistResponse(
+        playlist_id=id,
+        title=pl_title,
+        description=pl_descr,
+        videos=videos,
+    )
 
 
 class playlistQuery(BaseModel):
@@ -167,14 +169,36 @@ def searchPlaylists(query: playlistQuery):
 
     resp = getResponse("search", params, useCache=False)
 
-    # playlists = []
-    # if resp and resp.get("items"):
-    #     for item in resp["items"]:
-    #       playlists.append(item['snippet'])
-
     return resp
+
+def getVideoDetailsById(video_id: str, useCache=True) -> dict | None:
+    """
+    Returns the details about a video given its ID.
+    """
+    params = {
+        "part": "snippet,contentDetails,statistics",
+        "id": video_id,
+    }
+    resp = getResponse("videos", params, useCache=useCache)
+    if resp and "items" in resp and len(resp["items"]) > 0:
+        return resp["items"][0]
+    else:
+        log.warning("No video found for id: %s", video_id)
+        return
 
 
 def test_playlists():
-    id = "PLTWGH5orWwL1-W-t21jQOIWUO6GKsc0ir"
-    assert getPlaylistFromIdSimple(id) is not None
+    q_id = "PLTWGH5orWwL1-W-t21jQOIWUO6GKsc0ir"
+    raw = getPlaylistFromIdRaw(q_id)
+    assert raw is not None
+    size = int(raw.pageInfo['totalResults'])
+    simple = getPlaylistFromIdSimple(q_id)
+    assert  simple is not None
+    assert len(simple.videos)==size
+
+def test_video_id():
+    q_id = "gfhtaP5Wq7M"
+    video_detail = getVideoDetailsById(q_id,False)
+    print(video_detail)
+    assert video_detail is not None
+    assert video_detail['snippet']['title'] == "#39 Python Tutorial for Beginners | Factorial"
