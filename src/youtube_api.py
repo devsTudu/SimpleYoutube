@@ -15,13 +15,17 @@ cache = {}
 
 
 def getResponse(
-    endpoint: str, params: dict, timeout=5000, useCache=True
+    endpoint: str, params: dict, timeout=10, useCache=True
 ) -> dict | None:
     """
     Handles all the request to Youtube API with caching.
     """
     base_url = "https://youtube.googleapis.com/youtube/v3/"
-    params["key"] = getenv("YOUTUBE_API_KEY")
+    api_key = getenv("YOUTUBE_API_KEY")
+    if not api_key:
+        log.critical("YOUTUBE_API_KEY not set in environment variables.")
+        return None
+    params["key"] = api_key
     headers = {"Accept": "application/json"}
 
     # Create a unique cache key from endpoint and params
@@ -43,7 +47,7 @@ def getResponse(
         except Exception as e:
             log.error("%s sent error for %s, reason %s", endpoint, params, str(e))
             return None
-    log.critical("%s with %s, failed for %s", endpoint, params, response.text)
+    log.critical("%s failed %s for %s", endpoint,response.text, params)
     return None
 
 
@@ -127,7 +131,7 @@ def getPlaylistFromIdSimple(
             )
         page_next = playlist_response.nextPageToken
         if page_next:
-            playlist_response = getPlaylistFromIdRaw(id, page_next)
+            playlist_response = getPlaylistFromIdRaw(id, page_next, useCache=useCache)
         else:
             playlist_response = None
     return simplePlaylistResponse(
