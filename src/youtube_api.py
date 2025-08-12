@@ -1,208 +1,259 @@
-from requests import get
-from dotenv import load_dotenv
-from os import getenv
-from src.model import PlaylistItemsResponse, BaseModel
-from src.simple_model import simplePlaylistResponse, simpleVideoResponse, channelDetails
+from pydantic import ValidationError
+from typing import List, Optional
+from datetime import datetime
 
+from src.simple_model import (
+    CreatorDetail,
+    Course,
+    LessonInCourseDetail,
+    CourseDetailResponse,
+    LessonDetail,
+)
+from src.helper import YouTubeAPIClient, parse_iso8601_duration
 from utils import get_logger
 
 
-load_dotenv()
 log = get_logger(__name__)
 
-# Simple cache dictionary
-cache = {}
 
-
-def getResponse(
-    endpoint: str, params: dict, timeout=10, useCache=True
-) -> dict | None:
+def get_creator_details_by_id(
+    client: YouTubeAPIClient, creator_id: str
+) -> Optional[CreatorDetail]:
     """
-    Handles all the request to Youtube API with caching.
+    Fetches detailed information about a YouTube channel (creator).
+    Maps to your 'Get creator detail' API.
     """
-    base_url = "https://youtube.googleapis.com/youtube/v3/"
-    api_key = getenv("YOUTUBE_API_KEY")
-    if not api_key:
-        log.critical("YOUTUBE_API_KEY not set in environment variables.")
-        return None
-    params["key"] = api_key
-    headers = {"Accept": "application/json"}
+    params = {"part": "snippet,statistics", "id": creator_id}
+    resp = client._make_request("channels", params)
 
-    # Create a unique cache key from endpoint and params
-    cache_key = (endpoint, tuple(sorted(params.items())))
-
-    # Check if response is in cache
-    if cache_key in cache and useCache:
-        log.info("Cache hit for %s", cache_key)
-        return cache[cache_key]
-
-    response = get(base_url + endpoint, params, headers=headers, timeout=timeout)
-
-    if response.status_code == 200:
+    if resp and resp.get("items"):
         try:
-            response_json = response.json()
-            # Store response in cache
-            cache[cache_key] = response_json
-            return response_json
-        except Exception as e:
-            log.error("%s sent error for %s, reason %s", endpoint, params, str(e))
-            return None
-    log.critical("%s failed %s for %s", endpoint,response.text, params)
-    return None
-
-
-def getChannelInfobyId(id: str) -> channelDetails | None:
-    """
-    Returns the Channel Details for a given Channel ID
-    """
-
-    resp = getResponse("channels", {"part": "snippet,statistics", "id": id})
-    if resp:
-        try:
-            channel_data = resp.get("items", [])
-            channel_item = channel_data[0]
-            # Extract snippet and statistics data
+            channel_item = resp["items"][0]
             snippet_data = channel_item.get("snippet", {})
             statistics_data = channel_item.get("statistics", {})
 
-            # Combine the data for the channelDetails model
-            data = {
-                "title": snippet_data.get("title", ""),
+            # Clean and convert string numbers to int
+            views_count = int(statistics_data.get("viewCount", "0"))
+            subscriber_count = int(statistics_data.get("subscriberCount", "0"))
+            video_count = int(statistics_data.get("videoCount", "0"))
+
+            creator_data = {
+                "creator_id": channel_item.get("id", creator_id),
+                "creator_name": snippet_data.get("title", ""),
+                "title": None,  # YouTube API 'channels' endpoint doesn't typically provide a separate 'title' field for the channel itself beyond its name.
                 "description": snippet_data.get("description", ""),
-                "thumbnails": snippet_data.get("thumbnails", {}),
-                "viewsCount": statistics_data.get("viewCount", "0"),
-                "subscriberCount": statistics_data.get("subscriberCount", "0"),
-                "videoCount": statistics_data.get("videoCount", "0"),
+                "thumbnail_small": snippet_data.get("thumbnails", {})
+                .get("default", {})
+                .get("url"),
+                "thumbnail_big": snippet_data.get("thumbnails", {})
+                .get("high", {})
+                .get("url", ""),
+                "views_count": views_count,
+                "subscriber_count": subscriber_count,
+                "lesson_count": video_count,  # Mapping YouTube's 'videoCount' to your 'lesson_count'
             }
-            channel_details = channelDetails(**data)
-            return channel_details
-        except Exception as e:
-            log.warning("Failed to parse channel data %s \n %s", resp, str(e))
-
-
-def getPlaylistFromIdRaw(
-    id: str, page_token: str = "", useCache=True
-) -> PlaylistItemsResponse | None:
-    """
-    Returns the required Playlist in RAW Format
-    """
-
-    params = {"part": "snippet,contentDetails", "maxResults": "50", "playlistId": id}
-    if page_token:
-        params["pageToken"] = page_token
-
-    resp = getResponse("playlistItems", params, useCache=useCache)
-
-    if resp:
-        try:
-            return PlaylistItemsResponse(**resp)
-        except TypeError as e:
-            log.critical("Failed to parse playlist :%s \n %s", id, str(e))
+            return CreatorDetail(**creator_data)
+        except (KeyError, ValueError, ValidationError) as e:
+            log.warning(
+                f"Failed to parse creator data for ID {creator_id}: {e}. Raw response: {resp}"
+            )
+    log.warning(f"No creator found for ID: {creator_id}")
     return None
 
 
-def getPlaylistFromIdSimple(
-    id: str, useCache=True, pl_title: str = "", pl_descr: str = ""
-) -> simplePlaylistResponse | None:
+def search_courses(
+    client: YouTubeAPIClient, query: str, region: str = "IN", pageToken: str = ""
+) -> List[Course]:
     """
-    Returns the required Playlist in Simple Format
-    """
-    playlist_response = getPlaylistFromIdRaw(id,useCache=useCache)
-    videos = []
-    while playlist_response:
-        for item in playlist_response.items:
-            video_id = item.contentDetails.videoId
-            video_title = item.snippet.title
-            video_description = item.snippet.description
-            channel_name = item.snippet.channelTitle
-            channel_id = item.snippet.channelId
-
-            # Note: View count is not available in the playlist items response.
-            videos.append(
-                simpleVideoResponse(
-                    video_id=video_id,
-                    title=video_title,
-                    description=video_description,
-                    channel_name=channel_name,
-                    channel_id=channel_id,
-                    thumbnail=item.snippet.thumbnails,
-                    date_upload=item.contentDetails.videoPublishedAt,
-                )
-            )
-        page_next = playlist_response.nextPageToken
-        if page_next:
-            playlist_response = getPlaylistFromIdRaw(id, page_next, useCache=useCache)
-        else:
-            playlist_response = None
-    return simplePlaylistResponse(
-        playlist_id=id,
-        title=pl_title,
-        description=pl_descr,
-        videos=videos,
-    )
-
-
-class playlistQuery(BaseModel):
-    query: str
-    max_results: int = 50
-    pageToken: str = None
-    regionCode: str = "IN"
-
-
-def searchPlaylists(query: playlistQuery):
-    """
-    Searches for playlists using the YouTube API and returns a list of playlist
-
-    Args:
-        query: The search query.
-        max_results: The maximum number of results to return (default is 10).
-        pageToken: The page token for the next page of results.
-
-    Returns:
-        A list of playlist.
+    Searches for YouTube playlists (which represent courses in your app).
+    Maps to your 'Get relevant courses' API.
     """
     params = {
         "part": "snippet",
-        "q": query.query,
+        "q": query,
         "type": "playlist",
-        "maxResults": query.max_results,
-        "regionCode": query.regionCode,
+        "maxResults": 50,
+        "regionCode": region,
     }
-    if query.pageToken:
-        params["pageToken"] = query.pageToken
+    if pageToken != "":
+        params["pageToken"] = pageToken
 
-    resp = getResponse("search", params, useCache=False)
+    resp = client._make_request("search", params)
+    courses_list: List[Course] = []
 
-    return resp
+    if resp and resp.get("items"):
+        for item in resp["items"]:
+            try:
+                snippet = item.get("snippet", {})
+                play_id = item.get('id',{}).get("playlistId", "")
+                if not play_id:
+                    continue
+                course_data = {
+                    "course_id": play_id,  # Extract playlistId from 'id' field
+                    "course_name": snippet.get("title", ""),
+                    "course_description": snippet.get("description", ""),
+                    "thumbnail_small": snippet.get("thumbnails", {})
+                    .get("default", {})
+                    .get("url"),
+                    "thumbnail_big": snippet.get("thumbnails", {})
+                    .get("high", {})
+                    .get("url", ""),
+                    "creator_name": snippet.get("channelTitle", ""),
+                    "creator_id": snippet.get("channelId", ""),
+                    "published_date": (
+                        datetime.fromisoformat(
+                            snippet["publishedAt"].replace("Z", "+00:00")
+                        ).date()
+                        if snippet.get("publishedAt")
+                        else None
+                    ),
+                }
+                courses_list.append(Course(**course_data))
+            except (KeyError, ValueError, ValidationError) as e:
+                log.warning(
+                    f"Failed to parse course item from search results: {e}. Item: {item}"
+                )
+                continue  # Skip malformed item and continue with others
+    return { 'items':courses_list,
+            'next':resp.get('nextPageToken')
+    }
 
-def getVideoDetailsById(video_id: str, useCache=True) -> dict | None:
+
+def get_lessons_for_course(
+    client: YouTubeAPIClient, course_playlist_id: str
+) -> CourseDetailResponse:
     """
-    Returns the details about a video given its ID.
+    Fetches all lessons (videos) within a specific YouTube playlist (course).
+    Handles pagination to get all items. Maps to your 'Get Course Detail' API.
+    """
+    lessons_list: List[LessonInCourseDetail] = []
+    page_token: Optional[str] = ""
+
+    while True:
+        params = {
+            "part": "snippet,contentDetails",
+            "maxResults": "50",
+            "playlistId": course_playlist_id,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        playlist_response = client._make_request("playlistItems", params)
+
+        if not playlist_response or not playlist_response.get("items"):
+            break
+
+        for item in playlist_response["items"]:
+            try:
+                snippet = item.get("snippet", {})
+                content_details = item.get("contentDetails", {})
+
+                # YouTube's playlistItems endpoint gives videoId inside
+                # resourceId if not directly in contentDetails
+                video_id = content_details.get("videoId") or snippet.get(
+                    "resourceId", {}
+                ).get("videoId")
+
+                if not video_id:  # Skip if no video ID found for the item
+                    log.warning(f"Skipping playlist item without videoId: {item}")
+                    continue
+
+                lesson_data = {
+                    "lesson_id": video_id,  # Using video_id as lesson_id
+                    "lesson_title": snippet.get("title", ""),
+                    "lesson_description": snippet.get("description", ""),
+                    "creator_name": snippet.get("channelTitle", ""),
+                    "creator_id": snippet.get("channelId", ""),
+                    "published_date": (
+                        datetime.fromisoformat(
+                            snippet["publishedAt"].replace("Z", "+00:00")
+                        ).date()
+                        if snippet.get("publishedAt")
+                        else None
+                    ),
+                    "thumbnail_small": snippet.get("thumbnails", {})
+                    .get("default", {})
+                    .get("url"),
+                    "thumbnail_big": snippet.get("thumbnails", {})
+                    .get("high", {})
+                    .get("url", ""),
+                }
+                lessons_list.append(LessonInCourseDetail(**lesson_data))
+            except (KeyError, ValueError, ValidationError) as e:
+                log.warning(
+                    f"Failed to parse lesson item from playlist {course_playlist_id}: {e}. Item: {item}"
+                )
+                continue
+
+        page_token = playlist_response.get("nextPageToken")
+        if not page_token:
+            break
+
+    return CourseDetailResponse(lessons=lessons_list)
+
+
+def get_lesson_details_by_id(
+    client: YouTubeAPIClient, video_id: str
+) -> Optional[LessonDetail]:
+    """
+    Fetches comprehensive details for a single video (lesson).
+    Maps to your 'Get lesson detail' API.
     """
     params = {
         "part": "snippet,contentDetails,statistics",
         "id": video_id,
     }
-    resp = getResponse("videos", params, useCache=useCache)
-    if resp and "items" in resp and len(resp["items"]) > 0:
-        return resp["items"][0]
+    resp = client._make_request("videos", params)
+
+    if resp and resp.get("items"):
+        try:
+            video_item = resp["items"][0]
+            snippet = video_item.get("snippet", {})
+            content_details = video_item.get("contentDetails", {})
+            statistics = video_item.get("statistics", {})
+
+            # Convert string numbers to int, handling potential missing keys
+            views_count = int(statistics.get("viewCount", "0"))
+            like_count = int(statistics.get("likeCount", "0"))
+            comment_count = int(statistics.get("commentCount", "0"))
+
+            lesson_data = {
+                "lesson_id": video_item.get("id", video_id),
+                "video_id": video_item.get("id", video_id),
+                "creator_id": snippet.get("channelId", ""),
+                "creator_name": snippet.get("channelTitle", ""),
+                "lesson_title": snippet.get("title", ""),
+                "lesson_description": snippet.get("description", ""),
+                "publish_date": (
+                    datetime.fromisoformat(
+                        snippet["publishedAt"].replace("Z", "+00:00")
+                    ).date()
+                    if snippet.get("publishedAt")
+                    else None
+                ),
+                "thumbnail_small": snippet.get("thumbnails", {})
+                .get("default", {})
+                .get("url"),
+                "thumbnail_big": snippet.get("thumbnails", {})
+                .get("high", {})
+                .get("url", ""),
+                "category_id": snippet.get("categoryId"),
+                "duration_minutes": parse_iso8601_duration(
+                    content_details.get("duration", "")
+                ),
+                "views_count": views_count,
+                "like_count": like_count,
+                "comment_count": comment_count,
+            }
+            return LessonDetail(**lesson_data)
+        except (KeyError, ValueError, ValidationError) as e:
+            log.warning(
+                "Failed to parse video details for ID %s: %s. Raw response: %s",
+                video_id,
+                e,
+                resp,
+            )
     else:
-        log.warning("No video found for id: %s", video_id)
-        return
+        log.warning(f"No video found for ID: {video_id}")
+    return None
 
-
-def test_playlists():
-    q_id = "PLTWGH5orWwL1-W-t21jQOIWUO6GKsc0ir"
-    raw = getPlaylistFromIdRaw(q_id)
-    assert raw is not None
-    size = int(raw.pageInfo['totalResults'])
-    simple = getPlaylistFromIdSimple(q_id)
-    assert  simple is not None
-    assert len(simple.videos)==size
-
-def test_video_id():
-    q_id = "gfhtaP5Wq7M"
-    video_detail = getVideoDetailsById(q_id,False)
-    print(video_detail)
-    assert video_detail is not None
-    assert video_detail['snippet']['title'] == "#39 Python Tutorial for Beginners | Factorial"
