@@ -5,6 +5,7 @@ from src.youtube_api import (
     search_courses
 )
 
+from pprint import pprint as pp
 
 from src.routes.client import client
 
@@ -12,6 +13,7 @@ def test_playlists():
     q_id = "PLTWGH5orWwL1-W-t21jQOIWUO6GKsc0ir"
     raw = get_lessons_for_course(client, q_id)
     assert raw is not None
+    pp(raw)
     assert len(raw.lessons) > 0
 
 
@@ -27,7 +29,7 @@ def test_query():
     query = "Python Learning"
     resp = search_courses(client,query)
     print(resp)
-    assert len(resp)>10
+    assert len(resp['items'])>10
 
 
 def test_channel():

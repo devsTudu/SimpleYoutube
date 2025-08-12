@@ -1,32 +1,170 @@
--- Active: 1739596619152@@127.0.0.1@3306
--- Videos Table
-INSERT or REPLACE INTO "videoinfo"("thumbnail_url","video_id","videoTitle","videoDescr","channel_id") 
-VALUES('hello_world','kill','simple','Simpleton','hero2');
+-- Insert Courses
+INSERT OR REPLACE INTO
+    courses (
+        course_id,
+        course_name,
+        course_description,
+        thumbnail_small,
+        thumbnail_big,
+        creator_id,
+        published_date,
+        last_updated_date
+    )
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
--- Mark video started
-UPDATE "videoInfo" SET "startedOn" = CURRENT_TIMESTAMP WHERE video_id="kill";
+-- Insert lessons
+INSERT OR REPLACE INTO
+    lessons (
+        lesson_id,
+        video_id,
+        lesson_title,
+        lesson_description,
+        creator_id,
+        published_date,
+        thumbnail_small,
+        thumbnail_big,
+        duration_minutes,
+        views_count,
+        likes_count,
+        comments_count,
+        last_updated_date
+    )
+VALUES (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?
+    );
 
--- Mark Video Completed
-UPDATE "videoInfo" SET "completedOn" = CURRENT_TIMESTAMP WHERE video_id="sDFG";
+-- Insert Creators
+INSERT OR REPLACE INTO
+    creators (
+        creator_id,
+        creator_name,
+        title,
+        description,
+        thumbnail_small,
+        thumbnail_big,
+        views_count,
+        subscriber_count,
+        lesson_count,
+        last_updated_date
+    )
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+-- Add relations of Lesson and Course
+INSERT OR IGNORE INTO
+    course_lessons (course_id, lesson_id)
+VALUES (?, ?);
 
--- Notes table
-INSERT INTO "Notes"("video_id","notes_content") VALUES('sega','hello how are you');
+-- Add activity
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id,
+        timestamp
+    )
+VALUES (?, ?, ?, ?, ?);
 
--- Update Notes
-UPDATE "Notes" SET "lastUpdated"= CURRENT_TIMESTAMP, notes_content= "I am good"
-WHERE note_id=1;
+-- Bookmark a course
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id
+    )
+VALUES (
+        'debasish',
+        'BOOKMARK',
+        'course5by cid2',
+        NULL
+    );
 
---- Activity Table
-INSERT INTO "Activity"("searchTerm","course_id","lesson_id","coursename","lessonname","course_started","course_completed","lesson_completed","note_id","note_created","note_edited","note_deleted") 
-VALUES('searched','courseid','lessonid','coursename','lesson_name',true,true,false,'idofnote',true,false,true);
+-- Activity - Note Deleted
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id,
+        timestamp
+    )
+VALUES (?, 'NOTE_DELETED', ?, ?, ?);
 
--- Playlist
-INSERT INTO "Playlists"("playlistid","total_videos","channel_id") VALUES('pl1',4,'ch1');
+-- Activity a note taken
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id,
+        timestamp
+    )
+VALUES (?, 'NOTE_TAKEN', ?, ?, ?);
 
-INSERT INTO Playlist_Video_Junction (playlist_id, video_id)
-VALUES (5, 101);
+-- Activity lesson watched
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id,
+        timestamp
+    )
+VALUES (
+        'debasish',
+        'LESSON_WATCHED',
+        'course5by cid2',
+        'lesson_2_0',
+        '2025-08-13 12:53:17'
+    );
 
--- Channel
-INSERT INTO channel(channel_id, name, subscribers, views, thumbnail)
-VALUES("Heelo","Khan",123,234,"thumpsup")
+-- Activity Course Enrollment
+INSERT INTO
+    user_activity (
+        user_id,
+        event_type,
+        course_id,
+        lesson_id
+    )
+VALUES (
+        'debasish',
+        'ENROLL',
+        'course5by cid2',
+        NULL
+    );
+
+-- Insert a new note
+INSERT INTO
+    notes (
+        user_id,
+        course_id,
+        lesson_id,
+        note_content,
+        created_at
+    )
+VALUES (?, ?, ?, ?, ?);
+
+-- Update an existing note
+UPDATE notes
+SET
+    note_content = ?,
+    created_at = ? -- You might update 'created_at' to 'updated_at' for edits
+WHERE
+    note_id = ?
+    AND user_id = ?;
+
+-- Delete a note
+DELETE FROM notes WHERE note_id = ? AND user_id = ?;

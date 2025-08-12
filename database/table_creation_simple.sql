@@ -52,7 +52,7 @@ CREATE TABLE user_activity (
     event_type TEXT NOT NULL, -- e.g., 'ENROLL', 'BOOKMARK', 'LESSON_WATCHED', 'NOTE_TAKEN'
     course_id TEXT,
     lesson_id TEXT,
-    timestamp TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (course_id) REFERENCES courses(course_id),
     FOREIGN KEY (lesson_id) REFERENCES lessons(lesson_id)
 );
